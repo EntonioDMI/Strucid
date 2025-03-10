@@ -56,6 +56,18 @@ local function GetPlayerWeapon(character)
     return tool and tool.Name or "None"
 end
 
+local function IsPointVisible(point)
+    local ray = Ray.new(Camera.CFrame.Position, (point - Camera.CFrame.Position).Unit * 1000)
+    local hit, position = Workspace:FindPartOnRayWithIgnoreList(ray, {Camera, LocalPlayer.Character})
+    
+    if not hit then return true end
+    
+    local distance = (Camera.CFrame.Position - point).Magnitude
+    local hitDistance = (Camera.CFrame.Position - position).Magnitude
+    
+    return hitDistance > distance
+end
+
 local function GetBoxBounds(character)
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
@@ -140,7 +152,6 @@ local function CreateESPForPlayer(player)
         })
     }
     
-    -- Create 12 lines for 3D box
     for i = 1, 12 do
         espObjects.Box3D.Lines[i] = CreateDrawingObject("Line", {
             Thickness = 1,
@@ -181,10 +192,14 @@ local function Update2DBox(player, objects, screenPos, bounds)
     
     local minX, minY = math.huge, math.huge
     local maxX, maxY = -math.huge, -math.huge
+    local anyVisible = false
     
     for _, point in pairs(bounds) do
         local pointScreen = Camera:WorldToViewportPoint(point)
         if pointScreen.Z > 0 then
+            if IsPointVisible(point) then
+                anyVisible = true
+            end
             minX = math.min(minX, pointScreen.X)
             minY = math.min(minY, pointScreen.Y)
             maxX = math.max(maxX, pointScreen.X)
@@ -194,7 +209,7 @@ local function Update2DBox(player, objects, screenPos, bounds)
     
     objects.Box2D.Position = Vector2.new(minX, minY)
     objects.Box2D.Size = Vector2.new(maxX - minX, maxY - minY)
-    objects.Box2D.Visible = true
+    objects.Box2D.Visible = anyVisible
 end
 
 local function Update3DBox(player, objects, bounds)
@@ -225,7 +240,7 @@ local function Update3DBox(player, objects, bounds)
         local p1Screen = Camera:WorldToViewportPoint(p1)
         local p2Screen = Camera:WorldToViewportPoint(p2)
         
-        if p1Screen.Z > 0 and p2Screen.Z > 0 then
+        if p1Screen.Z > 0 and p2Screen.Z > 0 and (IsPointVisible(p1) or IsPointVisible(p2)) then
             objects.Box3D.Lines[i].From = Vector2.new(p1Screen.X, p1Screen.Y)
             objects.Box3D.Lines[i].To = Vector2.new(p2Screen.X, p2Screen.Y)
             objects.Box3D.Lines[i].Visible = true
@@ -256,12 +271,13 @@ local function UpdateESP()
                     end
                     
                     local screenPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+                    local isVisible = IsPointVisible(humanoidRootPart.Position)
                     
                     if onScreen then
                         Update2DBox(player, objects, screenPos, bounds)
                         Update3DBox(player, objects, bounds)
                         
-                        if WallhackModule.ShowName then
+                        if WallhackModule.ShowName and isVisible then
                             objects.Name.Text = player.Name
                             objects.Name.Position = Vector2.new(screenPos.X, screenPos.Y - 40)
                             objects.Name.Visible = true
@@ -269,7 +285,7 @@ local function UpdateESP()
                             objects.Name.Visible = false
                         end
                         
-                        if WallhackModule.ShowHP then
+                        if WallhackModule.ShowHP and isVisible then
                             local health = GetCharacterHealth(character)
                             objects.Health.Text = string.format("HP: %d", health)
                             objects.Health.Position = Vector2.new(screenPos.X, screenPos.Y - 25)
@@ -279,7 +295,7 @@ local function UpdateESP()
                             objects.Health.Visible = false
                         end
                         
-                        if WallhackModule.ShowDistance then
+                        if WallhackModule.ShowDistance and isVisible then
                             local distance = math.floor(GetDistanceFromCamera(humanoidRootPart.Position))
                             objects.Distance.Text = string.format("%dm", distance)
                             objects.Distance.Position = Vector2.new(screenPos.X, screenPos.Y + 25)
@@ -288,7 +304,7 @@ local function UpdateESP()
                             objects.Distance.Visible = false
                         end
                         
-                        if WallhackModule.ShowWeapon then
+                        if WallhackModule.ShowWeapon and isVisible then
                             local weapon = GetPlayerWeapon(character)
                             objects.Weapon.Text = weapon
                             objects.Weapon.Position = Vector2.new(screenPos.X, screenPos.Y + 40)
@@ -297,7 +313,7 @@ local function UpdateESP()
                             objects.Weapon.Visible = false
                         end
                         
-                        if WallhackModule.ShowTracers then
+                        if WallhackModule.ShowTracers and isVisible then
                             objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                             objects.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
                             objects.Tracer.Visible = true
@@ -337,20 +353,20 @@ local function UpdateHighlight(player)
     local highlight = HighlightObjects[player]
     if not highlight then return end
     
-    if WallhackModule.TeamCheck and player.Team then
-        local teamColor = player.TeamColor.Color
-        highlight.FillColor = teamColor
-        highlight.OutlineColor = teamColor
-    elseif WallhackModule.AutoTeamColor and player.Team and player.Team == LocalPlayer.Team then
-        highlight.FillColor = Color3.fromRGB(128, 128, 128)
-        highlight.OutlineColor = Color3.fromRGB(128, 128, 128)
+    if WallhackModule.TeamCheck and player.Team and player.Team == LocalPlayer.Team then
+        highlight.FillTransparency = 1
+        highlight.OutlineTransparency = 1
+    elseif WallhackModule.AutoTeamColor and player.Team then
+        highlight.FillColor = player.TeamColor.Color
+        highlight.OutlineColor = player.TeamColor.Color
+        highlight.FillTransparency = WallhackModule.FillTransparency
+        highlight.OutlineTransparency = WallhackModule.OutlineTransparency
     else
         highlight.FillColor = WallhackModule.FillColor
         highlight.OutlineColor = WallhackModule.OutlineColor
+        highlight.FillTransparency = WallhackModule.FillTransparency
+        highlight.OutlineTransparency = WallhackModule.OutlineTransparency
     end
-    
-    highlight.FillTransparency = WallhackModule.FillTransparency
-    highlight.OutlineTransparency = WallhackModule.OutlineTransparency
 end
 
 local function RemoveHighlight(player)
