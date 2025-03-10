@@ -10,28 +10,24 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
--- Settings
-local DrawLibSettings = {
-    Enabled = false,
-    ShowHP = false,
-    ShowDistance = false,
-    ShowWeapon = false,
-    ShowTracers = false,
-    ShowName = false,
-    Show2DBoxes = false,
-    Show3DBoxes = false
-}
+-- Public Variables (these will be set from main script)
+WallhackModule.DrawLibEnabled = false
+WallhackModule.ShowHP = false
+WallhackModule.ShowDistance = false
+WallhackModule.ShowWeapon = false
+WallhackModule.ShowTracers = false
+WallhackModule.ShowName = false
+WallhackModule.Show2DBoxes = false
+WallhackModule.Show3DBoxes = false
 
-local HighlightSettings = {
-    Enabled = false,
-    FillColor = Color3.fromRGB(255, 0, 0),
-    FillTransparency = 0.5,
-    OutlineColor = Color3.fromRGB(255, 255, 255),
-    OutlineTransparency = 0,
-    TeamCheck = false,
-    AutoTeamColor = false,
-    ComfortMode = false
-}
+WallhackModule.HighlightEnabled = false
+WallhackModule.FillColor = Color3.fromRGB(255, 0, 0)
+WallhackModule.FillTransparency = 0.5
+WallhackModule.OutlineColor = Color3.fromRGB(255, 255, 255)
+WallhackModule.OutlineTransparency = 0
+WallhackModule.TeamCheck = false
+WallhackModule.AutoTeamColor = false
+WallhackModule.ComfortMode = false
 
 -- DrawLib Objects Storage
 local DrawingObjects = {}
@@ -39,7 +35,7 @@ local DrawingObjects = {}
 -- Highlight Objects Storage
 local HighlightObjects = {}
 
--- Utility Functions
+-- Rest of the utility functions remain the same
 local function GetDistanceFromCamera(position)
     return (Camera.CFrame.Position - position).Magnitude
 end
@@ -81,7 +77,7 @@ local function GetBoxCorners(character)
     return corners
 end
 
--- DrawLib Functions
+-- DrawLib Functions remain the same but use WallhackModule variables
 local function CreateDrawingObject(type, properties)
     local object = Drawing.new(type)
     for property, value in pairs(properties) do
@@ -164,7 +160,7 @@ local function CreateESPForPlayer(player)
 end
 
 local function Update2DBox(player, objects, vector)
-    if not DrawLibSettings.Show2DBoxes then
+    if not WallhackModule.Show2DBoxes then
         objects.Box2D.Visible = false
         return
     end
@@ -183,7 +179,7 @@ local function Update2DBox(player, objects, vector)
 end
 
 local function Update3DBox(player, objects, character)
-    if not DrawLibSettings.Show3DBoxes then
+    if not WallhackModule.Show3DBoxes then
         for _, line in pairs(objects.Box3D) do
             line.Visible = false
         end
@@ -193,7 +189,6 @@ local function Update3DBox(player, objects, character)
     local corners = GetBoxCorners(character)
     if not corners then return end
     
-    -- Update box lines
     for _, corner in pairs(corners) do
         local vector, onScreen = Camera:WorldToViewportPoint(corner.Position)
         if not onScreen then
@@ -204,9 +199,7 @@ local function Update3DBox(player, objects, character)
         end
     end
     
-    -- Draw 3D box lines
-    -- Implementation for drawing the 3D box lines would go here
-    -- This requires calculating the positions of all corners and connecting them with lines
+    -- 3D box implementation would go here
 end
 
 local function UpdateESP()
@@ -215,18 +208,14 @@ local function UpdateESP()
             local character = player.Character
             local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
             
-            if humanoidRootPart and DrawLibSettings.Enabled then
+            if humanoidRootPart and WallhackModule.DrawLibEnabled then
                 local vector, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
                 
                 if onScreen then
-                    -- Update 2D Box
                     Update2DBox(player, objects, vector)
-                    
-                    -- Update 3D Box
                     Update3DBox(player, objects, character)
                     
-                    -- Update Name
-                    if DrawLibSettings.ShowName then
+                    if WallhackModule.ShowName then
                         objects.Name.Text = player.Name
                         objects.Name.Position = Vector2.new(vector.X, vector.Y - 40)
                         objects.Name.Visible = true
@@ -234,8 +223,7 @@ local function UpdateESP()
                         objects.Name.Visible = false
                     end
                     
-                    -- Update Health
-                    if DrawLibSettings.ShowHP then
+                    if WallhackModule.ShowHP then
                         local health = GetCharacterHealth(character)
                         objects.Health.Text = string.format("HP: %d", health)
                         objects.Health.Position = Vector2.new(vector.X, vector.Y - 25)
@@ -245,8 +233,7 @@ local function UpdateESP()
                         objects.Health.Visible = false
                     end
                     
-                    -- Update Distance
-                    if DrawLibSettings.ShowDistance then
+                    if WallhackModule.ShowDistance then
                         local distance = math.floor(GetDistanceFromCamera(humanoidRootPart.Position))
                         objects.Distance.Text = string.format("%dm", distance)
                         objects.Distance.Position = Vector2.new(vector.X, vector.Y + 25)
@@ -255,8 +242,7 @@ local function UpdateESP()
                         objects.Distance.Visible = false
                     end
                     
-                    -- Update Weapon
-                    if DrawLibSettings.ShowWeapon then
+                    if WallhackModule.ShowWeapon then
                         local weapon = GetPlayerWeapon(character)
                         objects.Weapon.Text = weapon
                         objects.Weapon.Position = Vector2.new(vector.X, vector.Y + 40)
@@ -265,8 +251,7 @@ local function UpdateESP()
                         objects.Weapon.Visible = false
                     end
                     
-                    -- Update Tracer
-                    if DrawLibSettings.ShowTracers then
+                    if WallhackModule.ShowTracers then
                         objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
                         objects.Tracer.To = Vector2.new(vector.X, vector.Y)
                         objects.Tracer.Visible = true
@@ -274,7 +259,6 @@ local function UpdateESP()
                         objects.Tracer.Visible = false
                     end
                 else
-                    -- Hide everything if not on screen
                     for _, object in pairs(objects) do
                         if typeof(object) == "table" then
                             for _, subObject in pairs(object) do
@@ -286,7 +270,6 @@ local function UpdateESP()
                     end
                 end
             else
-                -- Hide everything if conditions not met
                 for _, object in pairs(objects) do
                     if typeof(object) == "table" then
                         for _, subObject in pairs(object) do
@@ -301,14 +284,13 @@ local function UpdateESP()
     end
 end
 
--- Highlight Functions
 local function CreateHighlight(player)
     if not HighlightObjects[player] and player.Character then
         local highlight = Instance.new("Highlight")
-        highlight.FillColor = HighlightSettings.FillColor
-        highlight.FillTransparency = HighlightSettings.FillTransparency
-        highlight.OutlineColor = HighlightSettings.OutlineColor
-        highlight.OutlineTransparency = HighlightSettings.OutlineTransparency
+        highlight.FillColor = WallhackModule.FillColor
+        highlight.FillTransparency = WallhackModule.FillTransparency
+        highlight.OutlineColor = WallhackModule.OutlineColor
+        highlight.OutlineTransparency = WallhackModule.OutlineTransparency
         highlight.Parent = player.Character
         HighlightObjects[player] = highlight
     end
@@ -317,27 +299,27 @@ end
 local function UpdateHighlight(player)
     local highlight = HighlightObjects[player]
     if highlight then
-        if HighlightSettings.TeamCheck and player.Team then
+        if WallhackModule.TeamCheck and player.Team then
             local teamColor = player.TeamColor.Color
             highlight.FillColor = teamColor
             highlight.OutlineColor = teamColor
-        elseif HighlightSettings.AutoTeamColor and player.Team and player.Team == LocalPlayer.Team then
+        elseif WallhackModule.AutoTeamColor and player.Team and player.Team == LocalPlayer.Team then
             highlight.FillColor = Color3.fromRGB(128, 128, 128)
             highlight.OutlineColor = Color3.fromRGB(128, 128, 128)
         else
-            highlight.FillColor = HighlightSettings.FillColor
-            highlight.OutlineColor = HighlightSettings.OutlineColor
+            highlight.FillColor = WallhackModule.FillColor
+            highlight.OutlineColor = WallhackModule.OutlineColor
         end
         
-        highlight.FillTransparency = HighlightSettings.FillTransparency
-        highlight.OutlineTransparency = HighlightSettings.OutlineTransparency
+        highlight.FillTransparency = WallhackModule.FillTransparency
+        highlight.OutlineTransparency = WallhackModule.OutlineTransparency
     end
 end
 
 local function RemoveHighlight(player)
     local highlight = HighlightObjects[player]
     if highlight then
-        if HighlightSettings.ComfortMode then
+        if WallhackModule.ComfortMode then
             local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Linear)
             local tween = TweenService:Create(highlight, tweenInfo, {
                 FillTransparency = 1,
@@ -355,33 +337,11 @@ local function RemoveHighlight(player)
     end
 end
 
--- Module Functions
-function WallhackModule.SetDrawLibEnabled(enabled)
-    DrawLibSettings.Enabled = enabled
-end
-
-function WallhackModule.SetDrawLibSetting(setting, value)
-    DrawLibSettings[setting] = value
-end
-
-function WallhackModule.SetHighlightEnabled(enabled)
-    HighlightSettings.Enabled = enabled
-    if not enabled then
-        for player, _ in pairs(HighlightObjects) do
-            RemoveHighlight(player)
-        end
-    end
-end
-
-function WallhackModule.SetHighlightSetting(setting, value)
-    HighlightSettings[setting] = value
-end
-
 -- Initialize
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         CreateESPForPlayer(player)
-        if HighlightSettings.Enabled then
+        if WallhackModule.HighlightEnabled then
             CreateHighlight(player)
         end
     end
@@ -392,7 +352,7 @@ Players.PlayerAdded:Connect(function(player)
     if player ~= LocalPlayer then
         CreateESPForPlayer(player)
         player.CharacterAdded:Connect(function()
-            if HighlightSettings.Enabled then
+            if WallhackModule.HighlightEnabled then
                 CreateHighlight(player)
             end
         end)
@@ -416,11 +376,11 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 RunService.RenderStepped:Connect(function()
-    if DrawLibSettings.Enabled then
+    if WallhackModule.DrawLibEnabled then
         UpdateESP()
     end
     
-    if HighlightSettings.Enabled then
+    if WallhackModule.HighlightEnabled then
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 if IsAlive(player) then
