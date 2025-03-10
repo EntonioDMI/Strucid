@@ -10,7 +10,7 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
--- Public Variables (these will be set from main script)
+-- Public Variables
 WallhackModule.DrawLibEnabled = false
 WallhackModule.ShowHP = false
 WallhackModule.ShowDistance = false
@@ -19,6 +19,7 @@ WallhackModule.ShowTracers = false
 WallhackModule.ShowName = false
 WallhackModule.Show2DBoxes = false
 WallhackModule.Show3DBoxes = false
+WallhackModule.HideDeadPlayers = true
 
 WallhackModule.HighlightEnabled = false
 WallhackModule.FillColor = Color3.fromRGB(255, 0, 0)
@@ -35,7 +36,7 @@ local DrawingObjects = {}
 -- Highlight Objects Storage
 local HighlightObjects = {}
 
--- Rest of the utility functions remain the same
+-- Utility Functions
 local function GetDistanceFromCamera(position)
     return (Camera.CFrame.Position - position).Magnitude
 end
@@ -77,7 +78,6 @@ local function GetBoxCorners(character)
     return corners
 end
 
--- DrawLib Functions remain the same but use WallhackModule variables
 local function CreateDrawingObject(type, properties)
     local object = Drawing.new(type)
     for property, value in pairs(properties) do
@@ -87,6 +87,8 @@ local function CreateDrawingObject(type, properties)
 end
 
 local function CreateESPForPlayer(player)
+    if DrawingObjects[player] then return end
+    
     local espObjects = {
         Box2D = CreateDrawingObject("Square", {
             Thickness = 1,
@@ -159,6 +161,18 @@ local function CreateESPForPlayer(player)
     DrawingObjects[player] = espObjects
 end
 
+local function HideESP(objects)
+    for _, object in pairs(objects) do
+        if typeof(object) == "table" then
+            for _, subObject in pairs(object) do
+                subObject.Visible = false
+            end
+        else
+            object.Visible = false
+        end
+    end
+end
+
 local function Update2DBox(player, objects, vector)
     if not WallhackModule.Show2DBoxes then
         objects.Box2D.Visible = false
@@ -199,86 +213,116 @@ local function Update3DBox(player, objects, character)
         end
     end
     
-    -- 3D box implementation would go here
+    -- Update 3D box lines
+    local topFrontLeft, isTopFrontLeftVisible = Camera:WorldToViewportPoint(corners.topFrontLeft.Position)
+    local topFrontRight, isTopFrontRightVisible = Camera:WorldToViewportPoint(corners.topFrontRight.Position)
+    local topBackLeft, isTopBackLeftVisible = Camera:WorldToViewportPoint(corners.topBackLeft.Position)
+    local topBackRight, isTopBackRightVisible = Camera:WorldToViewportPoint(corners.topBackRight.Position)
+    
+    if isTopFrontLeftVisible and isTopFrontRightVisible then
+        objects.Box3D.TopLine.From = Vector2.new(topFrontLeft.X, topFrontLeft.Y)
+        objects.Box3D.TopLine.To = Vector2.new(topFrontRight.X, topFrontRight.Y)
+        objects.Box3D.TopLine.Visible = true
+    else
+        objects.Box3D.TopLine.Visible = false
+    end
+    
+    if isTopBackLeftVisible and isTopBackRightVisible then
+        objects.Box3D.BottomLine.From = Vector2.new(topBackLeft.X, topBackLeft.Y)
+        objects.Box3D.BottomLine.To = Vector2.new(topBackRight.X, topBackRight.Y)
+        objects.Box3D.BottomLine.Visible = true
+    else
+        objects.Box3D.BottomLine.Visible = false
+    end
+    
+    if isTopFrontLeftVisible and isTopBackLeftVisible then
+        objects.Box3D.LeftLine.From = Vector2.new(topFrontLeft.X, topFrontLeft.Y)
+        objects.Box3D.LeftLine.To = Vector2.new(topBackLeft.X, topBackLeft.Y)
+        objects.Box3D.LeftLine.Visible = true
+    else
+        objects.Box3D.LeftLine.Visible = false
+    end
+    
+    if isTopFrontRightVisible and isTopBackRightVisible then
+        objects.Box3D.RightLine.From = Vector2.new(topFrontRight.X, topFrontRight.Y)
+        objects.Box3D.RightLine.To = Vector2.new(topBackRight.X, topBackRight.Y)
+        objects.Box3D.RightLine.Visible = true
+    else
+        objects.Box3D.RightLine.Visible = false
+    end
 end
 
 local function UpdateESP()
     for player, objects in pairs(DrawingObjects) do
-        if player ~= LocalPlayer and player.Character and IsAlive(player) then
-            local character = player.Character
-            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if player ~= LocalPlayer and player.Character then
+            local isAlive = IsAlive(player)
+            if not isAlive and WallhackModule.HideDeadPlayers then
+                HideESP(objects)
+                continue
+            end
             
-            if humanoidRootPart and WallhackModule.DrawLibEnabled then
-                local vector, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
+            if WallhackModule.DrawLibEnabled then
+                local character = player.Character
+                local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
                 
-                if onScreen then
-                    Update2DBox(player, objects, vector)
-                    Update3DBox(player, objects, character)
+                if humanoidRootPart then
+                    local vector, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
                     
-                    if WallhackModule.ShowName then
-                        objects.Name.Text = player.Name
-                        objects.Name.Position = Vector2.new(vector.X, vector.Y - 40)
-                        objects.Name.Visible = true
+                    if onScreen then
+                        Update2DBox(player, objects, vector)
+                        Update3DBox(player, objects, character)
+                        
+                        if WallhackModule.ShowName then
+                            objects.Name.Text = player.Name
+                            objects.Name.Position = Vector2.new(vector.X, vector.Y - 40)
+                            objects.Name.Visible = true
+                        else
+                            objects.Name.Visible = false
+                        end
+                        
+                        if WallhackModule.ShowHP then
+                            local health = GetCharacterHealth(character)
+                            objects.Health.Text = string.format("HP: %d", health)
+                            objects.Health.Position = Vector2.new(vector.X, vector.Y - 25)
+                            objects.Health.Color = Color3.fromRGB(255 - (health * 2.55), health * 2.55, 0)
+                            objects.Health.Visible = true
+                        else
+                            objects.Health.Visible = false
+                        end
+                        
+                        if WallhackModule.ShowDistance then
+                            local distance = math.floor(GetDistanceFromCamera(humanoidRootPart.Position))
+                            objects.Distance.Text = string.format("%dm", distance)
+                            objects.Distance.Position = Vector2.new(vector.X, vector.Y + 25)
+                            objects.Distance.Visible = true
+                        else
+                            objects.Distance.Visible = false
+                        end
+                        
+                        if WallhackModule.ShowWeapon then
+                            local weapon = GetPlayerWeapon(character)
+                            objects.Weapon.Text = weapon
+                            objects.Weapon.Position = Vector2.new(vector.X, vector.Y + 40)
+                            objects.Weapon.Visible = true
+                        else
+                            objects.Weapon.Visible = false
+                        end
+                        
+                        if WallhackModule.ShowTracers then
+                            objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                            objects.Tracer.To = Vector2.new(vector.X, vector.Y)
+                            objects.Tracer.Visible = true
+                        else
+                            objects.Tracer.Visible = false
+                        end
                     else
-                        objects.Name.Visible = false
-                    end
-                    
-                    if WallhackModule.ShowHP then
-                        local health = GetCharacterHealth(character)
-                        objects.Health.Text = string.format("HP: %d", health)
-                        objects.Health.Position = Vector2.new(vector.X, vector.Y - 25)
-                        objects.Health.Color = Color3.fromRGB(255 - (health * 2.55), health * 2.55, 0)
-                        objects.Health.Visible = true
-                    else
-                        objects.Health.Visible = false
-                    end
-                    
-                    if WallhackModule.ShowDistance then
-                        local distance = math.floor(GetDistanceFromCamera(humanoidRootPart.Position))
-                        objects.Distance.Text = string.format("%dm", distance)
-                        objects.Distance.Position = Vector2.new(vector.X, vector.Y + 25)
-                        objects.Distance.Visible = true
-                    else
-                        objects.Distance.Visible = false
-                    end
-                    
-                    if WallhackModule.ShowWeapon then
-                        local weapon = GetPlayerWeapon(character)
-                        objects.Weapon.Text = weapon
-                        objects.Weapon.Position = Vector2.new(vector.X, vector.Y + 40)
-                        objects.Weapon.Visible = true
-                    else
-                        objects.Weapon.Visible = false
-                    end
-                    
-                    if WallhackModule.ShowTracers then
-                        objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                        objects.Tracer.To = Vector2.new(vector.X, vector.Y)
-                        objects.Tracer.Visible = true
-                    else
-                        objects.Tracer.Visible = false
+                        HideESP(objects)
                     end
                 else
-                    for _, object in pairs(objects) do
-                        if typeof(object) == "table" then
-                            for _, subObject in pairs(object) do
-                                subObject.Visible = false
-                            end
-                        else
-                            object.Visible = false
-                        end
-                    end
+                    HideESP(objects)
                 end
             else
-                for _, object in pairs(objects) do
-                    if typeof(object) == "table" then
-                        for _, subObject in pairs(object) do
-                            subObject.Visible = false
-                        end
-                    else
-                        object.Visible = false
-                    end
-                end
+                HideESP(objects)
             end
         end
     end
@@ -375,20 +419,33 @@ Players.PlayerRemoving:Connect(function(player)
     RemoveHighlight(player)
 end)
 
+-- Update Loop
+local lastUpdate = 0
+local updateInterval = 1/60 -- 60 FPS cap
+
 RunService.RenderStepped:Connect(function()
-    if WallhackModule.DrawLibEnabled then
-        UpdateESP()
-    end
-    
-    if WallhackModule.HighlightEnabled then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                if IsAlive(player) then
-                    CreateHighlight(player)
-                    UpdateHighlight(player)
-                else
-                    RemoveHighlight(player)
+    local currentTime = tick()
+    if currentTime - lastUpdate >= updateInterval then
+        lastUpdate = currentTime
+        
+        if WallhackModule.DrawLibEnabled then
+            UpdateESP()
+        end
+        
+        if WallhackModule.HighlightEnabled then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character then
+                    if IsAlive(player) or not WallhackModule.HideDeadPlayers then
+                        CreateHighlight(player)
+                        UpdateHighlight(player)
+                    else
+                        RemoveHighlight(player)
+                    end
                 end
+            end
+        else
+            for player, highlight in pairs(HighlightObjects) do
+                RemoveHighlight(player)
             end
         end
     end
