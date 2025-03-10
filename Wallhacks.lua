@@ -10,15 +10,19 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+-- Constants
+local BEAM_WIDTH = 0.3
+local MAX_DISTANCE = 1000
+local UPDATE_INTERVAL = 1/144 -- 144 FPS cap
+
 -- Public Variables
-WallhackModule.DrawLibEnabled = false
+WallhackModule.ESPEnabled = false
 WallhackModule.ShowHP = false
 WallhackModule.ShowDistance = false
 WallhackModule.ShowWeapon = false
 WallhackModule.ShowTracers = false
 WallhackModule.ShowName = false
-WallhackModule.Show2DBoxes = false
-WallhackModule.Show3DBoxes = false
+WallhackModule.ShowBoxes = false
 WallhackModule.HideDeadPlayers = true
 
 WallhackModule.HighlightEnabled = false
@@ -31,15 +35,11 @@ WallhackModule.AutoTeamColor = false
 WallhackModule.ComfortMode = false
 
 -- Storage
-local DrawingObjects = {}
+local ESPObjects = {}
 local HighlightObjects = {}
-local CachedPlayers = {}
+local BeamCache = {}
 
 -- Utility Functions
-local function GetDistanceFromCamera(position)
-    return (Camera.CFrame.Position - position).Magnitude
-end
-
 local function IsAlive(player)
     local character = player.Character
     local humanoid = character and character:FindFirstChild("Humanoid")
@@ -56,281 +56,239 @@ local function GetPlayerWeapon(character)
     return tool and tool.Name or "None"
 end
 
-local function IsPointVisible(point)
-    local ray = Ray.new(Camera.CFrame.Position, (point - Camera.CFrame.Position).Unit * 1000)
-    local hit, position = Workspace:FindPartOnRayWithIgnoreList(ray, {Camera, LocalPlayer.Character})
-    
-    if not hit then return true end
-    
-    local distance = (Camera.CFrame.Position - point).Magnitude
-    local hitDistance = (Camera.CFrame.Position - position).Magnitude
-    
-    return hitDistance > distance
+local function GetDistanceFromCamera(position)
+    return (Camera.CFrame.Position - position).Magnitude
 end
 
-local function GetBoxBounds(character)
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
+local function CreateBeam()
+    local attachment1 = Instance.new("Attachment")
+    local attachment2 = Instance.new("Attachment")
+    local beam = Instance.new("Beam")
     
-    local cframe = hrp.CFrame
-    local size = character:GetExtentsSize()
+    beam.Width0 = BEAM_WIDTH
+    beam.Width1 = BEAM_WIDTH
+    beam.FaceCamera = true
+    beam.Enabled = false
+    beam.Attachment0 = attachment1
+    beam.Attachment1 = attachment2
     
-    local front = cframe.LookVector * (size.Z/2)
-    local right = cframe.RightVector * (size.X/2)
-    local up = cframe.UpVector * (size.Y/2)
-    local pos = cframe.Position
-    
-    local points = {
-        FrontTopLeft = pos + front + up - right,
-        FrontTopRight = pos + front + up + right,
-        FrontBottomLeft = pos + front - up - right,
-        FrontBottomRight = pos + front - up + right,
-        BackTopLeft = pos - front + up - right,
-        BackTopRight = pos - front + up + right,
-        BackBottomLeft = pos - front - up - right,
-        BackBottomRight = pos - front - up + right
+    return {
+        beam = beam,
+        attachment1 = attachment1,
+        attachment2 = attachment2
     }
-    
-    return points
 end
 
-local function CreateDrawingObject(type, properties)
-    local object = Drawing.new(type)
-    for property, value in pairs(properties) do
-        object[property] = value
-    end
-    return object
-end
-
-local function CreateESPForPlayer(player)
-    if DrawingObjects[player] then return end
-    
-    local espObjects = {
-        Box2D = CreateDrawingObject("Square", {
-            Thickness = 1,
-            Filled = false,
-            Transparency = 1,
-            Color = Color3.new(1, 1, 1),
-            Visible = false
-        }),
-        Box3D = {
-            Lines = {}
-        },
-        Name = CreateDrawingObject("Text", {
-            Size = 13,
-            Center = true,
-            Outline = true,
-            Color = Color3.new(1, 1, 1),
-            Visible = false
-        }),
-        Health = CreateDrawingObject("Text", {
-            Size = 13,
-            Center = true,
-            Outline = true,
-            Color = Color3.new(0, 1, 0),
-            Visible = false
-        }),
-        Distance = CreateDrawingObject("Text", {
-            Size = 13,
-            Center = true,
-            Outline = true,
-            Color = Color3.new(1, 1, 1),
-            Visible = false
-        }),
-        Weapon = CreateDrawingObject("Text", {
-            Size = 13,
-            Center = true,
-            Outline = true,
-            Color = Color3.new(1, 1, 0),
-            Visible = false
-        }),
-        Tracer = CreateDrawingObject("Line", {
-            Thickness = 1,
-            Transparency = 1,
-            Color = Color3.new(1, 1, 1),
-            Visible = false
-        })
-    }
-    
-    for i = 1, 12 do
-        espObjects.Box3D.Lines[i] = CreateDrawingObject("Line", {
-            Thickness = 1,
-            Transparency = 1,
-            Color = Color3.new(1, 1, 1),
-            Visible = false
-        })
-    end
-    
-    DrawingObjects[player] = espObjects
-end
-
-local function HideESP(objects)
-    if not objects then return end
-    
-    for _, object in pairs(objects) do
-        if typeof(object) == "table" then
-            if object.Lines then
-                for _, line in pairs(object.Lines) do
-                    line.Visible = false
-                end
-            else
-                for _, subObject in pairs(object) do
-                    subObject.Visible = false
-                end
-            end
-        else
-            object.Visible = false
-        end
-    end
-end
-
-local function Update2DBox(player, objects, screenPos, bounds)
-    if not WallhackModule.Show2DBoxes then
-        objects.Box2D.Visible = false
-        return
-    end
-    
-    local minX, minY = math.huge, math.huge
-    local maxX, maxY = -math.huge, -math.huge
-    local anyVisible = false
-    
-    for _, point in pairs(bounds) do
-        local pointScreen = Camera:WorldToViewportPoint(point)
-        if pointScreen.Z > 0 then
-            if IsPointVisible(point) then
-                anyVisible = true
-            end
-            minX = math.min(minX, pointScreen.X)
-            minY = math.min(minY, pointScreen.Y)
-            maxX = math.max(maxX, pointScreen.X)
-            maxY = math.max(maxY, pointScreen.Y)
+local function GetOrCreateBeam()
+    for _, beamData in pairs(BeamCache) do
+        if not beamData.inUse then
+            beamData.inUse = true
+            return beamData
         end
     end
     
-    objects.Box2D.Position = Vector2.new(minX, minY)
-    objects.Box2D.Size = Vector2.new(maxX - minX, maxY - minY)
-    objects.Box2D.Visible = anyVisible
+    local beamData = CreateBeam()
+    beamData.inUse = true
+    table.insert(BeamCache, beamData)
+    return beamData
 end
 
-local function Update3DBox(player, objects, bounds)
-    if not WallhackModule.Show3DBoxes then
-        for _, line in pairs(objects.Box3D.Lines) do
-            line.Visible = false
-        end
-        return
-    end
+local function ReleaseBeam(beamData)
+    beamData.inUse = false
+    beamData.beam.Enabled = false
+end
+
+local function CreateESPObject(player)
+    if ESPObjects[player] then return end
     
-    local connections = {
-        {bounds.FrontTopLeft, bounds.FrontTopRight},
-        {bounds.FrontTopRight, bounds.FrontBottomRight},
-        {bounds.FrontBottomRight, bounds.FrontBottomLeft},
-        {bounds.FrontBottomLeft, bounds.FrontTopLeft},
-        {bounds.BackTopLeft, bounds.BackTopRight},
-        {bounds.BackTopRight, bounds.BackBottomRight},
-        {bounds.BackBottomRight, bounds.BackBottomLeft},
-        {bounds.BackBottomLeft, bounds.BackTopLeft},
-        {bounds.FrontTopLeft, bounds.BackTopLeft},
-        {bounds.FrontTopRight, bounds.BackTopRight},
-        {bounds.FrontBottomRight, bounds.BackBottomRight},
-        {bounds.FrontBottomLeft, bounds.BackBottomLeft}
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Size = UDim2.new(0, 200, 0, 100)
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Enabled = false
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0, 20)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.TextColor3 = Color3.new(1, 1, 1)
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    nameLabel.Parent = billboardGui
+    
+    local healthLabel = Instance.new("TextLabel")
+    healthLabel.Size = UDim2.new(1, 0, 0, 20)
+    healthLabel.Position = UDim2.new(0, 0, 0, 20)
+    healthLabel.BackgroundTransparency = 1
+    healthLabel.TextColor3 = Color3.new(0, 1, 0)
+    healthLabel.TextStrokeTransparency = 0
+    healthLabel.Font = Enum.Font.SourceSansBold
+    healthLabel.TextSize = 14
+    healthLabel.Parent = billboardGui
+    
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Size = UDim2.new(1, 0, 0, 20)
+    distanceLabel.Position = UDim2.new(0, 0, 0, 40)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.TextColor3 = Color3.new(1, 1, 1)
+    distanceLabel.TextStrokeTransparency = 0
+    distanceLabel.Font = Enum.Font.SourceSansBold
+    distanceLabel.TextSize = 14
+    distanceLabel.Parent = billboardGui
+    
+    local weaponLabel = Instance.new("TextLabel")
+    weaponLabel.Size = UDim2.new(1, 0, 0, 20)
+    weaponLabel.Position = UDim2.new(0, 0, 0, 60)
+    weaponLabel.BackgroundTransparency = 1
+    weaponLabel.TextColor3 = Color3.new(1, 1, 0)
+    weaponLabel.TextStrokeTransparency = 0
+    weaponLabel.Font = Enum.Font.SourceSansBold
+    weaponLabel.TextSize = 14
+    weaponLabel.Parent = billboardGui
+    
+    ESPObjects[player] = {
+        billboardGui = billboardGui,
+        nameLabel = nameLabel,
+        healthLabel = healthLabel,
+        distanceLabel = distanceLabel,
+        weaponLabel = weaponLabel,
+        beams = {}
     }
     
-    for i, connection in ipairs(connections) do
-        local p1, p2 = connection[1], connection[2]
-        local p1Screen = Camera:WorldToViewportPoint(p1)
-        local p2Screen = Camera:WorldToViewportPoint(p2)
+    return ESPObjects[player]
+end
+
+local function UpdateESPObject(player, character)
+    local espObject = ESPObjects[player]
+    if not espObject or not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    -- Update BillboardGui position
+    espObject.billboardGui.Parent = humanoidRootPart
+    
+    -- Update labels
+    if WallhackModule.ShowName then
+        espObject.nameLabel.Text = player.Name
+        espObject.nameLabel.Visible = true
+    else
+        espObject.nameLabel.Visible = false
+    end
+    
+    if WallhackModule.ShowHP then
+        local health = GetCharacterHealth(character)
+        espObject.healthLabel.Text = string.format("HP: %d", health)
+        espObject.healthLabel.TextColor3 = Color3.fromRGB(255 - (health * 2.55), health * 2.55, 0)
+        espObject.healthLabel.Visible = true
+    else
+        espObject.healthLabel.Visible = false
+    end
+    
+    if WallhackModule.ShowDistance then
+        local distance = math.floor(GetDistanceFromCamera(humanoidRootPart.Position))
+        espObject.distanceLabel.Text = string.format("%dm", distance)
+        espObject.distanceLabel.Visible = true
+    else
+        espObject.distanceLabel.Visible = false
+    end
+    
+    if WallhackModule.ShowWeapon then
+        local weapon = GetPlayerWeapon(character)
+        espObject.weaponLabel.Text = weapon
+        espObject.weaponLabel.Visible = true
+    else
+        espObject.weaponLabel.Visible = false
+    end
+    
+    -- Update box beams
+    if WallhackModule.ShowBoxes then
+        local size = character:GetExtentsSize()
+        local cf = humanoidRootPart.CFrame
         
-        if p1Screen.Z > 0 and p2Screen.Z > 0 and (IsPointVisible(p1) or IsPointVisible(p2)) then
-            objects.Box3D.Lines[i].From = Vector2.new(p1Screen.X, p1Screen.Y)
-            objects.Box3D.Lines[i].To = Vector2.new(p2Screen.X, p2Screen.Y)
-            objects.Box3D.Lines[i].Visible = true
-        else
-            objects.Box3D.Lines[i].Visible = false
+        local corners = {
+            cf * CFrame.new(size.X/2, size.Y/2, size.Z/2),
+            cf * CFrame.new(-size.X/2, size.Y/2, size.Z/2),
+            cf * CFrame.new(-size.X/2, -size.Y/2, size.Z/2),
+            cf * CFrame.new(size.X/2, -size.Y/2, size.Z/2),
+            cf * CFrame.new(size.X/2, size.Y/2, -size.Z/2),
+            cf * CFrame.new(-size.X/2, size.Y/2, -size.Z/2),
+            cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2),
+            cf * CFrame.new(size.X/2, -size.Y/2, -size.Z/2)
+        }
+        
+        local connections = {
+            {1, 2}, {2, 3}, {3, 4}, {4, 1},
+            {5, 6}, {6, 7}, {7, 8}, {8, 5},
+            {1, 5}, {2, 6}, {3, 7}, {4, 8}
+        }
+        
+        -- Release old beams
+        for _, beamData in pairs(espObject.beams) do
+            ReleaseBeam(beamData)
         end
+        table.clear(espObject.beams)
+        
+        -- Create new beams
+        for _, connection in ipairs(connections) do
+            local beamData = GetOrCreateBeam()
+            beamData.attachment1.WorldPosition = corners[connection[1]].Position
+            beamData.attachment2.WorldPosition = corners[connection[2]].Position
+            beamData.beam.Color = ColorSequence.new(WallhackModule.OutlineColor)
+            beamData.beam.Transparency = NumberSequence.new(WallhackModule.OutlineTransparency)
+            beamData.beam.Enabled = true
+            
+            beamData.attachment1.Parent = humanoidRootPart
+            beamData.attachment2.Parent = humanoidRootPart
+            beamData.beam.Parent = humanoidRootPart
+            
+            table.insert(espObject.beams, beamData)
+        end
+    else
+        for _, beamData in pairs(espObject.beams) do
+            ReleaseBeam(beamData)
+        end
+        table.clear(espObject.beams)
+    end
+    
+    -- Update tracer
+    if WallhackModule.ShowTracers then
+        if not espObject.tracer then
+            espObject.tracer = GetOrCreateBeam()
+        end
+        
+        local screenSize = Camera.ViewportSize
+        local screenCenter = Vector3.new(screenSize.X/2, screenSize.Y, 0)
+        
+        espObject.tracer.attachment1.WorldPosition = Camera.CFrame:PointToWorldSpace(screenCenter)
+        espObject.tracer.attachment2.WorldPosition = humanoidRootPart.Position
+        espObject.tracer.beam.Color = ColorSequence.new(WallhackModule.OutlineColor)
+        espObject.tracer.beam.Transparency = NumberSequence.new(WallhackModule.OutlineTransparency)
+        espObject.tracer.beam.Enabled = true
+        
+        espObject.tracer.attachment1.Parent = Camera
+        espObject.tracer.attachment2.Parent = humanoidRootPart
+        espObject.tracer.beam.Parent = Camera
+    elseif espObject.tracer then
+        ReleaseBeam(espObject.tracer)
+        espObject.tracer = nil
     end
 end
 
-local function UpdateESP()
-    for player, objects in pairs(DrawingObjects) do
-        if player ~= LocalPlayer and player.Character then
-            local isAlive = IsAlive(player)
-            if not isAlive and WallhackModule.HideDeadPlayers then
-                HideESP(objects)
-                continue
-            end
-            
-            if WallhackModule.DrawLibEnabled then
-                local character = player.Character
-                local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-                
-                if humanoidRootPart then
-                    local bounds = GetBoxBounds(character)
-                    if not bounds then 
-                        HideESP(objects)
-                        continue 
-                    end
-                    
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(humanoidRootPart.Position)
-                    local isVisible = IsPointVisible(humanoidRootPart.Position)
-                    
-                    if onScreen then
-                        Update2DBox(player, objects, screenPos, bounds)
-                        Update3DBox(player, objects, bounds)
-                        
-                        if WallhackModule.ShowName and isVisible then
-                            objects.Name.Text = player.Name
-                            objects.Name.Position = Vector2.new(screenPos.X, screenPos.Y - 40)
-                            objects.Name.Visible = true
-                        else
-                            objects.Name.Visible = false
-                        end
-                        
-                        if WallhackModule.ShowHP and isVisible then
-                            local health = GetCharacterHealth(character)
-                            objects.Health.Text = string.format("HP: %d", health)
-                            objects.Health.Position = Vector2.new(screenPos.X, screenPos.Y - 25)
-                            objects.Health.Color = Color3.fromRGB(255 - (health * 2.55), health * 2.55, 0)
-                            objects.Health.Visible = true
-                        else
-                            objects.Health.Visible = false
-                        end
-                        
-                        if WallhackModule.ShowDistance and isVisible then
-                            local distance = math.floor(GetDistanceFromCamera(humanoidRootPart.Position))
-                            objects.Distance.Text = string.format("%dm", distance)
-                            objects.Distance.Position = Vector2.new(screenPos.X, screenPos.Y + 25)
-                            objects.Distance.Visible = true
-                        else
-                            objects.Distance.Visible = false
-                        end
-                        
-                        if WallhackModule.ShowWeapon and isVisible then
-                            local weapon = GetPlayerWeapon(character)
-                            objects.Weapon.Text = weapon
-                            objects.Weapon.Position = Vector2.new(screenPos.X, screenPos.Y + 40)
-                            objects.Weapon.Visible = true
-                        else
-                            objects.Weapon.Visible = false
-                        end
-                        
-                        if WallhackModule.ShowTracers and isVisible then
-                            objects.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                            objects.Tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-                            objects.Tracer.Visible = true
-                        else
-                            objects.Tracer.Visible = false
-                        end
-                    else
-                        HideESP(objects)
-                    end
-                else
-                    HideESP(objects)
-                end
-            else
-                HideESP(objects)
-            end
-        end
+local function RemoveESPObject(player)
+    local espObject = ESPObjects[player]
+    if not espObject then return end
+    
+    espObject.billboardGui:Destroy()
+    
+    for _, beamData in pairs(espObject.beams) do
+        ReleaseBeam(beamData)
     end
+    
+    if espObject.tracer then
+        ReleaseBeam(espObject.tracer)
+    end
+    
+    ESPObjects[player] = nil
 end
 
 local function CreateHighlight(player)
@@ -395,7 +353,9 @@ end
 -- Initialize
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
-        CreateESPForPlayer(player)
+        if WallhackModule.ESPEnabled then
+            CreateESPObject(player)
+        end
         if WallhackModule.HighlightEnabled then
             CreateHighlight(player)
         end
@@ -405,7 +365,9 @@ end
 -- Event Connections
 Players.PlayerAdded:Connect(function(player)
     if player ~= LocalPlayer then
-        CreateESPForPlayer(player)
+        if WallhackModule.ESPEnabled then
+            CreateESPObject(player)
+        end
         
         player.CharacterAdded:Connect(function(character)
             if WallhackModule.HighlightEnabled then
@@ -416,38 +378,49 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-    if DrawingObjects[player] then
-        for _, object in pairs(DrawingObjects[player]) do
-            if typeof(object) == "table" then
-                if object.Lines then
-                    for _, line in pairs(object.Lines) do
-                        line:Remove()
-                    end
-                else
-                    for _, subObject in pairs(object) do
-                        subObject:Remove()
-                    end
-                end
-            else
-                object:Remove()
-            end
-        end
-        DrawingObjects[player] = nil
-    end
+    RemoveESPObject(player)
     RemoveHighlight(player)
 end)
 
 -- Update Loop
 local lastUpdate = 0
-local updateInterval = 1/144 -- 144 FPS cap
 
 RunService.RenderStepped:Connect(function()
     local currentTime = tick()
-    if currentTime - lastUpdate >= updateInterval then
+    if currentTime - lastUpdate >= UPDATE_INTERVAL then
         lastUpdate = currentTime
         
-        if WallhackModule.DrawLibEnabled then
-            UpdateESP()
+        if WallhackModule.ESPEnabled then
+            for player, espObject in pairs(ESPObjects) do
+                if player ~= LocalPlayer and player.Character then
+                    if IsAlive(player) or not WallhackModule.HideDeadPlayers then
+                        espObject.billboardGui.Enabled = true
+                        UpdateESPObject(player, player.Character)
+                    else
+                        espObject.billboardGui.Enabled = false
+                        for _, beamData in pairs(espObject.beams) do
+                            ReleaseBeam(beamData)
+                        end
+                        table.clear(espObject.beams)
+                        if espObject.tracer then
+                            ReleaseBeam(espObject.tracer)
+                            espObject.tracer = nil
+                        end
+                    end
+                end
+            end
+        else
+            for _, espObject in pairs(ESPObjects) do
+                espObject.billboardGui.Enabled = false
+                for _, beamData in pairs(espObject.beams) do
+                    ReleaseBeam(beamData)
+                end
+                table.clear(espObject.beams)
+                if espObject.tracer then
+                    ReleaseBeam(espObject.tracer)
+                    espObject.tracer = nil
+                end
+            end
         end
         
         if WallhackModule.HighlightEnabled then
